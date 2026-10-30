@@ -538,6 +538,8 @@ class DataIngestionAgent:
             print("[WARN] Ledger CSV not found.")
             return pd.DataFrame()
         df = pd.read_csv(self.ledger_path, parse_dates=["date"])
+        if 'odds_source' not in df.columns:
+            df['odds_source'] = ''
         mask = (pd.to_datetime(df["date"]) >= self.window_start) & \
                (pd.to_datetime(df["date"]) <= self.window_end) & \
                (df["status"] == "PENDING")
@@ -610,6 +612,8 @@ class ModelValidatorAgent:
             return ("REJECTED", f"model prob out of bounds ({p:.3f})")
         if not (odds > 1.0):
             return ("REJECTED", f"invalid odds ({odds})")
+        if str(row.get("odds_source", "")).strip() == "":
+            return ("REJECTED", "ODDS_UNVERIFIED (no real bookmaker price)")
         if not (0.2 <= lh <= 5.0 and 0.2 <= la <= 5.0):
             return ("REJECTED", f"lambda anomaly ({lh}/{la})")
         if ev_pct < self.min_ev_pct:
@@ -765,7 +769,7 @@ def fetch_and_evaluate_opportunities(
         away = str(row['away'])
         league = str(row.get('league', 'La Liga'))
         market = str(row.get('market', 'Over 2.5'))
-        odds = float(row.get('market_odds', 1.90))
+        odds = float(row.get('market_odds') or float('nan'))
 
         # 1. Dixon-Coles pricing via Quant agent (strictly this league's params)
         pricing = quant_agent.price_fixture(home, away, league)
@@ -789,6 +793,7 @@ def fetch_and_evaluate_opportunities(
 
         # Preserve or update values
         row_dict = row.to_dict()
+        row_dict['odds_source'] = str(row.get('odds_source', '')).strip()
         row_dict['p_model'] = round(float(p_model), 4)
         row_dict['p_fair'] = risk['p_fair']
         row_dict['ev_percent'] = risk['ev_percent']

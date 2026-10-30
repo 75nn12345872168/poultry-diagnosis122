@@ -1,0 +1,22 @@
+{
+  "cutoff": "2026-10-30 00:00:00",
+  "pending_before": 82,
+  "eligible_played": 7,
+  "settled_now": 0,
+  "result_not_found": 7,
+  "ambiguous_average": 0,
+  "pending_after": 82,
+  "total_settled_all_time": 6,
+  "wins": 2,
+  "half_wins": 2,
+  "losses": 2,
+  "settled_units": 6,
+  "hit_rate_percent": 50.0,
+  "total_profit_units": 0.0228,
+  "total_staked": 0.1086,
+  "cumulative_roi_percent": 20.99,
+  "leagues": [
+    "La Liga",
+    "Ligue 1"
+  ]
+}

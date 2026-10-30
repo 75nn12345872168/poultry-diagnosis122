@@ -1,7 +1,7 @@
 timestamp,date,home,away,pred_over,edge,market_odds,stake,status,result,profit,league,market,pred
 2026-09-06 16:20:55,2027-05-23 15:00:00,Alaves,Real Madrid,0.744,0.217,1.9,0.0302,PENDING,,,La Liga,Over 2.5,
 2026-09-06 16:20:55,2026-11-01 16:00:00,Barcelona,Alaves,0.71,0.184,1.9,0.0255,PENDING,,,La Liga,Over 2.5,
-2026-09-06 16:20:55,2026-10-18 15:00:00,Real Madrid,Sevilla,0.71,0.183,1.9,0.0255,PENDING,,,La Liga,Over 2.5,
+2026-09-06 16:20:55,2026-10-18 15:00:00,Real Madrid,Sevilla,0.71,0.183,1.9,0.0255,WIN,4-1,0.0229,La Liga,Over 2.5,
 2026-09-06 16:20:55,2027-04-04 15:00:00,Barcelona,Sevilla,0.695,0.168,1.9,0.0234,PENDING,,,La Liga,Over 2.5,
 2026-09-06 16:20:55,2027-03-21 16:00:00,Celta Vigo,Real Madrid,0.687,0.161,1.9,0.0223,PENDING,,,La Liga,Over 2.5,
 2026-09-06 16:20:55,2027-04-18 15:00:00,Atletico Madrid,Sevilla,0.672,0.145,1.9,0.0202,PENDING,,,La Liga,Over 2.5,
@@ -12,7 +12,7 @@ timestamp,date,home,away,pred_over,edge,market_odds,stake,status,result,profit,l
 2026-09-06 16:20:55,2027-05-02 15:00:00,Atletico Madrid,Alaves,0.642,0.115,1.9,0.016,PENDING,,,La Liga,Over 2.5,
 2026-09-06 16:20:55,2027-05-02 15:00:00,Real Betis,Valencia,0.64,0.114,1.9,0.0159,PENDING,,,La Liga,Over 2.5,
 2026-09-06 16:20:55,2027-04-18 15:00:00,Real Betis,Athletic Club,0.639,0.113,1.9,0.0157,PENDING,,,La Liga,Over 2.5,
-2026-09-06 16:20:55,2026-09-13 15:00:00,Real Sociedad,Atletico Madrid,0.634,0.108,1.9,0.015,PENDING,,,La Liga,Over 2.5,
+2026-09-06 16:20:55,2026-09-13 15:00:00,Real Sociedad,Atletico Madrid,0.634,0.108,1.9,0.015,WIN,0-3,0.0135,La Liga,Over 2.5,
 2026-09-06 16:20:55,2027-01-10 16:00:00,Athletic Club,Villarreal,0.632,0.106,1.9,0.0147,PENDING,,,La Liga,Over 2.5,
 2026-09-06 16:20:55,2027-03-14 16:00:00,Real Madrid,Espanyol,0.63,0.104,1.9,0.0144,PENDING,,,La Liga,Over 2.5,
 2026-09-06 16:20:55,2026-12-06 16:00:00,Athletic Club,Real Madrid,0.629,0.103,1.9,0.0143,PENDING,,,La Liga,Over 2.5,
@@ -28,12 +28,12 @@ timestamp,date,home,away,pred_over,edge,market_odds,stake,status,result,profit,l
 2026-09-06 16:20:55,2027-02-28 16:00:00,Athletic Club,Barcelona,0.612,0.086,1.9,0.0119,PENDING,,,La Liga,Over 2.5,
 2026-09-06 16:20:55,2026-11-08 16:00:00,Valencia,Real Madrid,0.61,0.084,1.9,0.0116,PENDING,,,La Liga,Over 2.5,
 2026-09-06 16:20:55,2027-03-21 16:00:00,Espanyol,Athletic Club,0.606,0.08,1.9,0.0111,PENDING,,,La Liga,Over 2.5,
-2026-09-06 17:41:58,2026-09-13 18:45:00,Brest,Paris Saint Germain,,0.152,1.9,0.0211,PENDING,,,Ligue 1,AH -0.75,0.678
+2026-09-06 17:41:58,2026-09-13 18:45:00,Brest,Paris Saint Germain,,0.152,1.9,0.0211,HALF WIN,0-1,0.0095,Ligue 1,AH -0.75,0.678
 2026-09-06 17:41:58,2026-09-19 13:00:00,Monaco,Lens,,0.11,1.9,0.0152,PENDING,,,Ligue 1,AH -0.75,0.636
-2026-09-06 17:41:58,2026-10-10 13:00:00,Lille,Le Havre,,0.118,1.9,0.0165,PENDING,,,Ligue 1,AH -0.75,0.645
-2026-09-06 17:41:58,2026-10-10 13:00:00,Monaco,Toulouse,,0.128,1.9,0.0178,PENDING,,,Ligue 1,AH -0.75,0.654
+2026-09-06 17:41:58,2026-10-10 13:00:00,Lille,Le Havre,,0.118,1.9,0.0165,HALF WIN,1-0,0.0074,Ligue 1,AH -0.75,0.645
+2026-09-06 17:41:58,2026-10-10 13:00:00,Monaco,Toulouse,,0.128,1.9,0.0178,LOSS,2-2,-0.0178,Ligue 1,AH -0.75,0.654
 2026-09-06 17:41:58,2026-10-10 13:00:00,Rennes,Auxerre,,0.102,1.9,0.0142,PENDING,,,Ligue 1,AH -0.75,0.629
-2026-09-06 17:41:58,2026-10-17 13:00:00,Lille,Brest,,0.092,1.9,0.0127,PENDING,,,Ligue 1,AH -0.75,0.618
+2026-09-06 17:41:58,2026-10-17 13:00:00,Lille,Brest,,0.092,1.9,0.0127,LOSS,1-1,-0.0127,Ligue 1,AH -0.75,0.618
 2026-09-06 17:41:58,2026-10-17 13:00:00,Lyon,Nice,,0.164,1.9,0.0227,PENDING,,,Ligue 1,AH -0.75,0.69
 2026-09-06 17:41:59,2026-10-24 13:00:00,Marseille,Le Havre,,0.181,1.9,0.0251,PENDING,,,Ligue 1,AH -0.75,0.707
 2026-09-06 17:41:59,2026-10-31 14:00:00,Le Havre,Paris Saint Germain,,0.202,1.9,0.0281,PENDING,,,Ligue 1,AH -0.75,0.728
