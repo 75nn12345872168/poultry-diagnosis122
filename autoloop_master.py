@@ -509,12 +509,16 @@ class DataIngestionAgent:
     """Loads ledger fixtures and discovers active leagues (I/O only)."""
 
     def __init__(self, ledger_path: str = "paper_trading_ledger_2026.csv",
-                 window_start: str = "2026-09-06", window_days: int = 8) -> None:
-        self.ledger_path = Path(__file__).parent / ledger_path
-        if not self.ledger_path.exists():
-            self.ledger_path = Path(ledger_path)
-        self.window_start = pd.to_datetime(window_start)
-        self.window_end = self.window_start + pd.Timedelta(days=window_days)
+                     window_days: int = 8) -> None:
+            self.ledger_path = Path(__file__).parent / ledger_path
+            if not self.ledger_path.exists():
+                self.ledger_path = Path(ledger_path)
+            # ROLLING window: always the NEXT `window_days` from today, so each run
+            # picks the current upcoming gameweek. The old hardcoded start
+            # ("2026-09-06") froze the window and re-sent the same early fixtures
+            # every week for months. The window now advances with the clock.
+            self.window_start = pd.Timestamp.now().normalize()
+            self.window_end = self.window_start + pd.Timedelta(days=window_days)
 
     def leagues(self) -> List[str]:
         """Distinct leagues in the ledger (fallback: La Liga)."""
@@ -639,6 +643,79 @@ class ModelValidatorAgent:
 # ==============================================================================
 # 4. SETTLEMENT & PIPELINE EXECUTION
 # ==============================================================================
+
+class PortfolioExposureController:
+    """
+    Multi-bet exposure control: prevents over-allocation when many +EV bets
+    land on the same matchday (cross-bet correlation risk / simultaneous loss).
+
+    Method: after individual 0.25-Kelly stakes are set, group approved bets by
+    kickoff date and apply a per-matchday aggregate cap (fraction of bankroll).
+    When a matchday's summed stakes exceed the cap, ALL stakes in that group are
+    scaled down proportionally — preserving the model's relative-conviction
+    ordering rather than dropping the weakest picks outright.
+    """
+
+    def __init__(self, matchday_cap: float = 0.12, global_cap: float = 0.30,
+                 kelly_fraction: float = 0.25) -> None:
+        self.matchday_cap = float(matchday_cap)      # max total stake per kickoff date
+        self.global_cap = float(global_cap)          # max total stake across whole slate
+        self.kelly_fraction = kelly_fraction
+        # Audit trail for reporting.
+        self.scaled_matchdays = 0
+        self.scaled_global = False
+
+    @staticmethod
+    def _group(day: Any) -> str:
+        try:
+            return pd.to_datetime(day).strftime("%Y-%m-%d")
+        except Exception:
+            return str(day)
+
+    def apply(self, df: pd.DataFrame) -> pd.DataFrame:
+        """
+        Returns a copy of ``df`` with ``stake_kelly`` scaled down to satisfy the
+        per-matchday (then global) aggregate exposure caps. Fractional-Kelly
+        ordering is preserved; no stake is ever increased.
+        """
+        if df is None or df.empty:
+            return df
+        out = df.copy()
+        raw_col = out.get("stake_kelly", out.get("stake"))
+        if raw_col is None:
+            return out
+        out["stake_kelly"] = pd.to_numeric(raw_col, errors="coerce").fillna(0.0)
+        out["stake_raw"] = out["stake_kelly"]  # pre-shrink record for audit
+
+        # 1. Per-matchday aggregate cap (proportional shrink within each date group).
+        self.scaled_matchdays = 0
+        for day, grp in out.groupby(out["date"].map(self._group)):
+            grp_sum = float(grp["stake_kelly"].sum())
+            if grp_sum > self.matchday_cap and grp_sum > 0:
+                factor = self.matchday_cap / grp_sum
+                mask = out["date"].map(self._group) == day
+                out.loc[mask, "stake_kelly"] = out.loc[mask, "stake_kelly"] * factor
+                self.scaled_matchdays += 1
+
+        # 2. Global slate cap (proportional shrink across all approved bets).
+        total = float(out["stake_kelly"].sum())
+        if total > self.global_cap and total > 0:
+            factor = self.global_cap / total
+            out["stake_kelly"] = out["stake_kelly"] * factor
+            self.scaled_global = True
+
+        out["stake_kelly"] = out["stake_kelly"].round(4)
+        return out
+
+    def audit_note(self) -> str:
+        """Human-readable portfolio-control summary for the report."""
+        parts = []
+        if self.scaled_matchdays > 0:
+            parts.append(f"matchday-cap applied x{self.scaled_matchdays}")
+        if self.scaled_global:
+            parts.append("global-cap applied")
+        return "، ".join(parts) if parts else "within caps"
+
 
 def run_settlement() -> Dict[str, Any]:
     """
@@ -817,8 +894,56 @@ def send_telegram_alert(message: str) -> None:
 
 
 # ==============================================================================
-# MAIN ENTRYPOINT
+# 5b. DEDUP STATE — a fixture+market is dispatched ONCE, never re-sent weekly.
+# Persisted inside autoloop_last_run.json (already committed by the Git action),
+# so the "already sent" memory survives GitHub Actions runs.
 # ==============================================================================
+
+def _fixture_key(r: Any) -> str:
+    """Unique key for one recommendation: date|home|away|market."""
+    try:
+        d = str(r['date'])[:10]
+    except Exception:
+        d = "?"
+    return f"{d}|{r['home']}|{r['away']}|{r['market']}"
+
+
+def _load_sent_keys() -> set:
+    """Return set of fixture keys already dispatched in previous runs."""
+    try:
+        p = Path('autoloop_last_run.json')
+        if p.exists():
+            data = json.loads(p.read_text(encoding='utf-8'))
+            return set(data.get('sent_fixture_keys', []))
+    except Exception:
+        pass
+    return set()
+
+
+def dedup_opportunities(df_opps: pd.DataFrame, sent_keys: set) -> tuple:
+    """
+    Split recommendations into NEW (not yet dispatched) vs ALREADY-SENT.
+    Returns (new_df, already_sent_keys, skipped_count).
+    """
+    if df_opps is None or df_opps.empty:
+        return df_opps, set(), 0
+    new_rows, new_keys, skipped = [], set(), 0
+    for _, r in df_opps.iterrows():
+        k = _fixture_key(r)
+        if k in sent_keys:
+            skipped += 1
+        else:
+            new_rows.append(r.to_dict())
+            new_keys.add(k)
+    if new_rows:
+        new_df = pd.DataFrame(new_rows, columns=df_opps.columns)
+    else:
+        new_df = df_opps.iloc[0:0]
+    return new_df, new_keys, skipped
+
+
+    # MAIN ENTRYPOINT
+    # ==============================================================================
 
 def main():
     start_time = time.time()
@@ -844,10 +969,26 @@ def main():
 
     # 3. Critic audit -> final consensus drives all downstream outputs
     df_opps, df_rejected = critic_agent.audit(df_evaluated)
-    critic_note = (f"{len(df_opps)} معتمدة / {len(df_rejected)} مرفوضة "
-                   f"(بوابة EV ≥ {critic_agent.min_ev_pct:.1f}%)")
 
-    # 4. Format Telegram Message
+    # 3b. Multi-bet portfolio exposure control (per-matchday + global caps).
+    portfolio_controller = PortfolioExposureController(
+        matchday_cap=0.12, global_cap=0.30, kelly_fraction=0.25)
+    df_opps = portfolio_controller.apply(df_opps)
+    port_note = portfolio_controller.audit_note()
+    print(f"[PORTFOLIO] matchday-caps triggered={portfolio_controller.scaled_matchdays} "
+          f"global-cap={portfolio_controller.scaled_global} | {port_note}")
+
+    # 3c. Dedup: never re-dispatch a fixture+market already sent in an earlier run
+    # (fixes the weekly repeat of the same match). Only NEW recommendations are
+    # included in the report, and their keys are persisted for future runs.
+    sent_keys = _load_sent_keys()
+    df_opps, newly_sent_keys, skipped_sent = dedup_opportunities(df_opps, sent_keys)
+    if skipped_sent:
+        print(f"[DEDUP] skipped {skipped_sent} already-dispatched recommendation(s).")
+
+    critic_note = (f"{len(df_opps)} معتمدة / {len(df_rejected)} مرفوضة "
+                   + (f"/ {skipped_sent} مكررة (تم إرسالها سابقاً)" if skipped_sent else "") + " "
+                   f"(بوابة EV ≥ {critic_agent.min_ev_pct:.1f}% | تحكم المحفظة: {port_note})")
     report_text = format_telegram_report(summary, df_opps, critic_note=critic_note)
     print("\n--- [TELEGRAM PREVIEW] ---")
     print(report_text)
@@ -862,9 +1003,10 @@ def main():
         'opportunities_count': int(len(df_opps)),
         'opportunities': df_opps.astype(str).to_dict(orient='records') if not df_opps.empty else [],
         'rejected_count': int(len(df_rejected)),
-        'rejected': df_rejected.astype(str).to_dict(orient='records') if not df_rejected.empty else [],
-        'report_markdown': report_text
-    }
+                'rejected': df_rejected.astype(str).to_dict(orient='records') if not df_rejected.empty else [],
+                'report_markdown': report_text,
+                'sent_fixture_keys': sorted(sent_keys | newly_sent_keys)
+            }
     Path('autoloop_last_run.json').write_text(json.dumps(out_payload, ensure_ascii=False, indent=2, default=str), encoding='utf-8')
     print("[SAVED] telegram_last_report.txt & autoloop_last_run.json updated.")
     
