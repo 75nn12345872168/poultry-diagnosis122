@@ -460,42 +460,46 @@ def estimate_match_lambdas(
     league: str,
     league_avg_home: Optional[float] = None,
     league_avg_away: Optional[float] = None,
-    rolling_matches: int = 5
+    rolling_matches: int = 5,
+    team_model=None,
+    fixture_date=None,
 ) -> Tuple[float, float]:
     """
-    Computes expected goal intensities (lambda_home, lambda_away) with rolling form & xG shrinkage.
-    League baselines resolve STRICTLY per league (this league's MLE fit, else global priors).
-    Falls back gracefully to robust league priors when granular historical logs are initializing.
+    Computes expected goal intensities (lambda_home, lambda_away) with
+    DATA-DRIVEN club strengths (team_strength.TeamStrengthModel) instead of the
+    old hand-coded `top_elites` constants. League baselines resolve STRICTLY
+    per league. A club without usable history falls back to the league average
+    (strength = 1.0) — never to another league's numbers. If `fixture_date` is
+    given, only matches played BEFORE it are used (no look-ahead leakage).
     """
+    import pandas as pd
+    if team_model is None:
+        try:
+            from team_strength import get_model
+            team_model = get_model()
+        except Exception:
+            team_model = None
+
+    if team_model is not None:
+        mu_h, mu_a, _ = team_model.league_baselines(league)
+        if league_avg_home is not None:
+            mu_h = league_avg_home
+        if league_avg_away is not None:
+            mu_a = league_avg_away
+        as_of = pd.to_datetime(fixture_date) if fixture_date is not None else None
+        att_h, def_h = team_model.strength(league, home_team, as_of=as_of)
+        att_a, def_a = team_model.strength(league, away_team, as_of=as_of)
+        # Dixon-Coles factorisation: lambda = league baseline * att(home) * def(away)
+        lambda_h = mu_h * att_h * def_a
+        lambda_a = mu_a * att_a * def_h
+        return (round(float(min(5.0, max(0.3, lambda_h))), 3),
+                round(float(min(5.0, max(0.3, lambda_a))), 3))
+
+    # Fallback (no data available): league-average priors, strength 1.0 both.
     _lg_mu_h, _lg_mu_a, _ = get_league_params(league)
-    if league_avg_home is None:
-        league_avg_home = _lg_mu_h
-    if league_avg_away is None:
-        league_avg_away = _lg_mu_a
-    
-    # Specialized club strength adjustments (Priors based on 5-year rolling xG/Deep metrics)
-    top_elites = {
-        'Paris Saint Germain': {'att': 2.35, 'def': 0.85},
-        'Real Madrid': {'att': 2.20, 'def': 0.90},
-        'Barcelona': {'att': 2.25, 'def': 0.95},
-        'Atletico Madrid': {'att': 1.85, 'def': 0.80},
-        'Monaco': {'att': 1.90, 'def': 1.15},
-        'Marseille': {'att': 1.80, 'def': 1.10},
-        'Lille': {'att': 1.70, 'def': 1.00},
-        'Real Sociedad': {'att': 1.35, 'def': 1.05},
-        'Brest': {'att': 1.25, 'def': 1.45},
-        'Athletic Club': {'att': 1.55, 'def': 1.05},
-        'Villarreal': {'att': 1.65, 'def': 1.35},
-    }
-    
-    h_profile = top_elites.get(home_team, {'att': league_avg_home, 'def': league_avg_away})
-    a_profile = top_elites.get(away_team, {'att': league_avg_away, 'def': league_avg_home})
-    
-    # Lambda formulation: Attack(H) * Defense(A) / LeagueAvg
-    lambda_h = (h_profile['att'] * a_profile['def']) / max(0.5, league_avg_away)
-    lambda_a = (a_profile['att'] * h_profile['def']) / max(0.5, league_avg_home)
-    
-    return round(float(lambda_h), 3), round(float(lambda_a), 3)
+    mu_h = league_avg_home if league_avg_home is not None else _lg_mu_h
+    mu_a = league_avg_away if league_avg_away is not None else _lg_mu_a
+    return round(float(mu_h), 3), round(float(mu_a), 3)
 
 
 # ==============================================================================
@@ -561,9 +565,9 @@ class QuantCalibrationAgent:
                   f"ρ={mle['rho']:.3f} status={mle['status']} n={mle['n']}")
         return results
 
-    def price_fixture(self, home: str, away: str, league: str) -> Dict[str, Any]:
+    def price_fixture(self, home: str, away: str, league: str, fixture_date=None) -> Dict[str, Any]:
         """Full quantitative pricing for one fixture using its league's params."""
-        lh, la = estimate_match_lambdas(home, away, league)
+        lh, la = estimate_match_lambdas(home, away, league, fixture_date=fixture_date)
         rho = get_league_params(league)[2]
         matrix = compute_dixon_coles_probs(lh, la, league=league)
         return {"lh": lh, "la": la, "rho": float(rho),
@@ -772,7 +776,7 @@ def fetch_and_evaluate_opportunities(
         odds = float(row.get('market_odds') or float('nan'))
 
         # 1. Dixon-Coles pricing via Quant agent (strictly this league's params)
-        pricing = quant_agent.price_fixture(home, away, league)
+        pricing = quant_agent.price_fixture(home, away, league, fixture_date=row['date'])
         market_probs = pricing["market_probs"]
 
         # 2. Extract model probability based on market
