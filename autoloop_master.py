@@ -1026,5 +1026,22 @@ def main():
     print(f"[AUTOLOOP] Pipeline execution complete in {elapsed:.2f} seconds. (Sub-45s limit satisfied).")
 
 
+def _send_telegram_test() -> None:
+    """Explicit delivery test: sends a standalone marker so the user can verify
+    the bot reaches their chat, independent of any recommendation content."""
+    from datetime import datetime
+    msg = ("🧪 <b>اختبار الإرسال — Telegram Delivery Test</b>\n"
+           "إذا وصلت هذه الرسالة فهذا دليل أن البوت يعمل ويصل إلى دردشتك.\n"
+           f"• الزمن: <code>{datetime.now().isoformat()}</code>\n"
+           "• يليها تقرير تسوية الجولة القادمة (إن وُجدت توصيات مؤكدة الأسعار).")
+    print("--- [TELEGRAM TEST] ---")
+    print(msg)
+    print("------------------------")
+    send_telegram_alert(msg)
+
+
 if __name__ == '__main__':
-    main()
+    if '--telegram-test' in sys.argv:
+        _send_telegram_test()
+    else:
+        main()

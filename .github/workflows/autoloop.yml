@@ -5,6 +5,12 @@ on:
     - cron: '0 9 * * 1'   # Monday 09:00 UTC = Settlement
     - cron: '0 18 * * 5'  # Friday 18:00 UTC = Fetch Weekend
   workflow_dispatch:
+    inputs:
+      telegram_test:
+        description: 'Send a delivery-test message to Telegram (no odds needed)'
+        required: false
+        default: 'false'
+        type: boolean
 
 jobs:
   autoloop:
@@ -29,6 +35,13 @@ jobs:
         env:
           THE_ODDS_API_KEY: ${{ secrets.THE_ODDS_API_KEY }}
         run: python fetch_odds.py
+
+      - name: Telegram delivery test (manual trigger)
+        if: ${{ inputs.telegram_test == true }}
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: python autoloop_master.py --telegram-test
 
       - name: Run autoloop_master.py
         env:
