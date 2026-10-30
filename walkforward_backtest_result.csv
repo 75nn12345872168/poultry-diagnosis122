@@ -1,0 +1,2 @@
+matches,base_over_rate_percent,mean_model_over_percent,brier,brier_baseline,brier_skill_score,logloss,logloss_baseline,logloss_skill,calibration_max_abs_dev,pred_vs_actual_corr,threshold_0.50,illustrative_roi_flat_2.0_percent,illustrative_roi_synthetic_margin_percent,NOTE_real_odds_not_available
+3040,46.68,46.14,0.244,0.2489,0.0196,0.6818,0.6909,0.0133,0.0691,0.1433,,14.68,7.64,"ROI values use assumed/synthetic prices and are ILLUSTRATIVE, not tradable."
