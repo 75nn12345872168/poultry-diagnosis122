@@ -597,8 +597,9 @@ class RiskManagementAgent:
 class ModelValidatorAgent:
     """The Critic: audits priced opportunities and outputs the final consensus."""
 
-    def __init__(self, min_ev_pct: float = 2.0) -> None:
+    def __init__(self, min_ev_pct: float = 2.0, model_tip_min: float = 0.58) -> None:
         self.min_ev_pct = min_ev_pct
+        self.model_tip_min = model_tip_min
 
     def _audit_row(self, row: Dict[str, Any]) -> Tuple[str, str]:
         """Return (verdict, reason) for one evaluated opportunity."""
@@ -610,19 +611,23 @@ class ModelValidatorAgent:
             la = float(row.get("la", 1.2))
         except (TypeError, ValueError):
             return ("REJECTED", "unparseable numeric fields")
-        if not (np.isfinite(p) and np.isfinite(ev_pct) and np.isfinite(odds)):
+        if not (np.isfinite(p) and np.isfinite(odds)):
             return ("REJECTED", "non-finite model/odds fields")
         if not (0.01 <= p <= 0.99):
             return ("REJECTED", f"model prob out of bounds ({p:.3f})")
         if not (odds > 1.0):
             return ("REJECTED", f"invalid odds ({odds})")
-        if str(row.get("odds_source", "")).strip() == "":
-            return ("REJECTED", "ODDS_UNVERIFIED (no real bookmaker price)")
         if not (0.2 <= lh <= 5.0 and 0.2 <= la <= 5.0):
             return ("REJECTED", f"lambda anomaly ({lh}/{la})")
-        if ev_pct < self.min_ev_pct:
-            return ("REJECTED", f"EV {ev_pct:+.1f}% below {self.min_ev_pct:.1f}% gate")
-        return ("APPROVED", "passes EV gate and sanity bounds")
+        price_type = str(row.get("price_type", "model"))
+        if price_type == "verified":
+            if not np.isfinite(ev_pct) or ev_pct < self.min_ev_pct:
+                return ("REJECTED", f"EV {ev_pct:+.1f}% below {self.min_ev_pct:.1f}% gate")
+            return ("APPROVED", f"verified price, EV {ev_pct:+.1f}%")
+        if p < self.model_tip_min:
+            return ("REJECTED", f"model tip below {self.model_tip_min:.0%} confidence (p={p:.2f})")
+        m = float(row.get("min_odds") or 0.0)
+        return ("APPROVED", f"model tip (p={p:.1%}, find odds \u2265 {m:.2f})")
 
     def audit(self, df: pd.DataFrame) -> Tuple[pd.DataFrame, pd.DataFrame]:
         """
@@ -792,17 +797,35 @@ def fetch_and_evaluate_opportunities(
         if pd.isna(p_model) or p_model <= 0:
             p_model = float(row.get('pred_over', row.get('pred', 0.58)))
 
-        # 3-4. Fair value + stake sizing via Risk agent
-        risk = risk_agent.evaluate(float(p_model), odds)
+        # 3-4. Price & edge: use a REAL bookmaker price when the ledger has one
+        # (odds_source == 'the-odds-api'); otherwise emit a MODEL TIP with an
+        # explicit minimum price the bettor must find in the market.
+        odds_source = str(row.get('odds_source', '')).strip()
+        breakeven = round(1.0 / float(p_model), 2)
+        has_real = (odds_source == 'the-odds-api' and pd.notna(odds) and odds > 1.0)
+        if has_real:
+            risk = risk_agent.evaluate(float(p_model), odds)
+            price_type = 'verified'; min_odds = None; use_odds = round(float(odds), 2)
+            p_fair = risk['p_fair']; ev_percent = risk['ev_percent']
+            edge = risk['edge']; stake_kelly = risk['stake_kelly']
+        else:
+            # Model tip: no verified market price -> neutral EV, confidence stake
+            # only, and min_odds is the break-even the bettor must beat.
+            price_type = 'model'; min_odds = breakeven; use_odds = breakeven
+            p_fair = float(p_model); ev_percent = 0.0; edge = 0.0
+            stake_kelly = 0.02 if p_model >= 0.58 else 0.0
 
         # Preserve or update values
         row_dict = row.to_dict()
-        row_dict['odds_source'] = str(row.get('odds_source', '')).strip()
+        row_dict['odds_source'] = odds_source
+        row_dict['price_type'] = price_type
+        row_dict['min_odds'] = min_odds
         row_dict['p_model'] = round(float(p_model), 4)
-        row_dict['p_fair'] = risk['p_fair']
-        row_dict['ev_percent'] = risk['ev_percent']
-        row_dict['edge'] = risk['edge']
-        row_dict['stake_kelly'] = risk['stake_kelly']
+        row_dict['p_fair'] = float(p_fair)
+        row_dict['ev_percent'] = ev_percent
+        row_dict['edge'] = float(edge)
+        row_dict['stake_kelly'] = float(stake_kelly)
+        row_dict['market_odds'] = float(use_odds)
         row_dict['lh'] = pricing['lh']
         row_dict['la'] = pricing['la']
         row_dict['rho'] = round(float(pricing['rho']), 4)
@@ -845,30 +868,38 @@ def format_telegram_report(summary: Dict[str, Any], df_opps: pd.DataFrame,
 • إجمالي العمليات المعلقة: <b>{pending}</b>
 • معايرة MLE: <code>{_mle_txt}</code>
 {_critic_block}
-🚀 <b>التوصيات المعتمدة للجولة القادمة (Dixon-Coles + 0.25 Kelly)</b>
+🚀 <b>توصيات النموذج للجولة القادمة</b>
 """
 
     if df_opps.empty:
-        msg += "<i>لا توجد فرص تحقق شروط القيمة (+EV > 8%) لهذه الجولة.</i>\n"
+        msg += "<i>لا توجد توصيات مؤكدة لهذه الجولة.</i>\n"
     else:
+        _any_model = False
         for _, r in df_opps.iterrows():
             d_str = str(r['date'])[:10]
             league = r['league']
             home = r['home']
             away = r['away']
             market = r['market']
-            odds = float(r.get('market_odds', 1.90))
             p_mod = float(r.get('p_model', 0.60)) * 100
-            p_fair = float(r.get('p_fair', 0.52)) * 100
-            ev = float(r.get('ev_percent', 10.0))
             stake = float(r.get('stake_kelly', r.get('stake', 0.02))) * 100
-            
+            pt = str(r.get('price_type', 'model'))
+            if pt == 'verified':
+                odds = float(r.get('market_odds', 2.00))
+                ev = float(r.get('ev_percent', 0.0))
+                price_line = f"  🎯 <b>{market}</b> @ <b>{odds:.2f}</b> (سعر سوق مؤكد)\n"
+            else:
+                _any_model = True
+                ev = 0.0
+                mo = float(r.get('min_odds') or 0.0)
+                price_line = f"  🎯 <b>{market}</b> | احتمال النموذج <b>{p_mod:.0f}%</b> → ابحث عن سعر ≥ <b>{mo:.2f}</b>\n"
             msg += f"• <b>{d_str} | {league}</b>\n"
             msg += f"  ⚽ {home} vs {away}\n"
-            msg += f"  🎯 <b>{market}</b> @ <b>{odds:.2f}</b>\n"
-            msg += f"  📈 Model: <code>{p_mod:.1f}%</code> | Fair: <code>{p_fair:.1f}%</code> | EV: <code>{ev:+.1f}%</code>\n"
-            msg += f"  💰 حجم الرهان (0.25 Kelly): <b>{stake:.2f}%</b>\n\n"
-            
+            msg += price_line
+            msg += f"  📈 EV: <code>{ev:+.1f}%</code> | حجم الرهان: <b>{stake:.2f}%</b>\n\n"
+        if _any_model:
+            msg += ("⚠️ <i>الأسعار أعلاه تقديرات النموذج (لم تُتحقق من السوق)."
+                    " التزم بالحد الأدنى للسعر. لأسعار سوق مؤكدة ضبط مفتاح THE_ODDS_API_KEY.</i>\n")
     msg += "━━━━━━━━━━━━━━━━━━━━\n"
     msg += f"⚡ <i>المحرك الكمي نشط | المصدر: paper_trading_ledger_2026.csv</i>"
     return msg.strip()
